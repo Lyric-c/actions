@@ -28,10 +28,10 @@ jobs:
             
             - name: Build Docker image
               run: |
-                docker build \ 
+                docker build \
                   -f ${{ github.event.inputs.dockerfile_path }} \
                   --build-arg ENABLED_MODULES="${{ github.event.inputs.modules }}" \
-                  -t nginx:${{ github.event.inputs.image_tag }}\
+                  -t nginx:${{ github.event.inputs.image_tag }} \
                   .
             - name: Save and compress image
               run: |
