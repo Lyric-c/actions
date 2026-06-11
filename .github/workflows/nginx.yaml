@@ -32,7 +32,7 @@ jobs:
                   -f ${{ github.event.inputs.dockerfile_path }} \
                   --build-arg ENABLED_MODULES="${{ github.event.inputs.modules }}" \
                   -t nginx:${{ github.event.inputs.image_tag }} \
-                  .
+                  nginx
             - name: Save and compress image
               run: |
                 docker save nginx:${{ github.event.inputs.image_tag }} | gzip > nginx_${{ github.event.inputs.image_tag }}.tar.gz
