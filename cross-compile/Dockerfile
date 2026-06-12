@@ -2,6 +2,7 @@ FROM golang:1.23-bullseye
 
 ENV GO111MODULE=on
 ENV CGO_ENABLED=1
+ENV GOPROXY=https://goproxy.cn,direct
 ENV GOCACHE=/gocache/cache
 ENV GOMODCACHE=/gocache/mod_cache
 ENV GOPATH=/gocache/path
