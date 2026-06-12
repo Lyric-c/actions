@@ -16,8 +16,8 @@ RUN apt update && \
         apt clean && \
         rm -rf /var/lib/apt/lists/*
 
-COPY ./loong-gcc8:/usr/local/loong/gcc
-COPY ./loong-gcc15:/usr/local/loongnix23.1
-COPY ./loong-go:/usr/local/loong/go
+COPY ./loong-gcc8 /usr/local/loong/gcc
+COPY ./loong-gcc15 /usr/local/loongnix23.1
+COPY ./loong-go /usr/local/loong/go
 
 WORKDIR /app
