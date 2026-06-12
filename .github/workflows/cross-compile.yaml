@@ -38,7 +38,7 @@ jobs:
             - name: Build Docker image
               run: |
                 docker build \
-                  -f cross-compile\Dockerfile \
+                  -f cross-compile/Dockerfile \
                   -t cross-compile:$(date "+%Y%d%m") \
                   cross-compile
 
