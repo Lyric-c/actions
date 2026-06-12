@@ -1,0 +1,19 @@
+FROM golang:1.23-bullseye
+
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+ENV GOCACHE=/gocache/cache
+ENV GOMODCACHE=/gocache/mod_cache
+ENV GOPATH=/gocache/path
+
+RUN apt update && \
+        apt install -y --no-install-recommends binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
+            binutils-mingw-w64 \
+            gcc-mingw-w64-x86-64 \
+            libluajit-5.1-dev \
+            libc6-dev-arm64-cross && \
+        apt clean && \
+        rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
