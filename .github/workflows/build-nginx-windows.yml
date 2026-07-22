@@ -64,6 +64,11 @@ jobs:
           wget -q "https://github.com/winshining/nginx-http-flv-module/archive/refs/tags/v${FLV_VERSION}.tar.gz"
           tar -xzf "v${FLV_VERSION}.tar.gz"
 
+          echo "==> Downloading PCRE2 ..."
+          PCRE2_VERSION="10.44"
+          wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
+          tar -xzf "pcre2-${PCRE2_VERSION}.tar.gz"
+
           # ---------------------------------------------------------------
           # 2. Configure nginx
           # ---------------------------------------------------------------
@@ -79,6 +84,7 @@ jobs:
             --error-log-path=logs/error.log \
             --with-cc-opt="-O2 -fno-strict-aliasing -Wno-error" \
             --with-ld-opt="-Wl,-s" \
+            --with-pcre="/tmp/pcre2-${PCRE2_VERSION}" \
             --with-select_module \
             --with-poll_module \
             --with-http_ssl_module \
