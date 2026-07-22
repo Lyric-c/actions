@@ -32,7 +32,7 @@ jobs:
           install: >-
             mingw-w64-i686-gcc
             mingw-w64-i686-zlib
-            mingw-w64-i686-pcre
+            mingw-w64-i686-pcre2
             mingw-w64-i686-openssl
             mingw-w64-i686-binutils
             make
@@ -81,6 +81,7 @@ jobs:
             --with-ld-opt="-Wl,-s" \
             --with-select_module \
             --with-poll_module \
+            --with-pcre2 \
             --with-http_ssl_module \
             --with-http_realip_module \
             --with-http_addition_module \
