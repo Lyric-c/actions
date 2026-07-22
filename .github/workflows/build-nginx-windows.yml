@@ -69,6 +69,13 @@ jobs:
           wget -q "https://github.com/winshining/nginx-http-flv-module/archive/refs/tags/v${FLV_VERSION}.tar.gz"
           tar -xzf "v${FLV_VERSION}.tar.gz"
 
+          # Fix: MinGW's stdint.h already provides int8_t/uint8_t;
+          # the module's redefinition conflicts with GCC 16 on MINGW32
+          sed -i '/typedef __int8.*int8_t;/d' \
+            "/tmp/nginx-http-flv-module-${FLV_VERSION}/ngx_rtmp.h"
+          sed -i '/typedef unsigned __int8.*uint8_t;/d' \
+            "/tmp/nginx-http-flv-module-${FLV_VERSION}/ngx_rtmp.h"
+
           echo "==> Downloading PCRE2 ${PCRE2_VERSION} ..."
           wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
           tar -xzf "pcre2-${PCRE2_VERSION}.tar.gz"
