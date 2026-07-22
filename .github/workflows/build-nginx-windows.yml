@@ -81,7 +81,6 @@ jobs:
             --with-ld-opt="-Wl,-s" \
             --with-select_module \
             --with-poll_module \
-            --with-pcre2 \
             --with-http_ssl_module \
             --with-http_realip_module \
             --with-http_addition_module \
