@@ -17,6 +17,11 @@ on:
         default: '1.2.13'
         type: string
 
+env:
+  PCRE2_VERSION: "10.44"
+  ZLIB_VERSION: "1.3.1"
+  OPENSSL_VERSION: "3.0.16"
+
 jobs:
   build:
     runs-on: windows-latest
@@ -31,9 +36,6 @@ jobs:
           update: true
           install: >-
             mingw-w64-i686-gcc
-            mingw-w64-i686-zlib
-            mingw-w64-i686-pcre2
-            mingw-w64-i686-openssl
             mingw-w64-i686-binutils
             make
             perl
@@ -48,11 +50,14 @@ jobs:
 
           NGINX_VERSION="${{ github.event.inputs.nginx_version }}"
           FLV_VERSION="${{ github.event.inputs.flv_module_version }}"
+          PCRE2_VERSION="${{ env.PCRE2_VERSION }}"
+          ZLIB_VERSION="${{ env.ZLIB_VERSION }}"
+          OPENSSL_VERSION="${{ env.OPENSSL_VERSION }}"
 
           echo "=== Building nginx ${NGINX_VERSION} with nginx-http-flv-module ${FLV_VERSION} ==="
 
           # ---------------------------------------------------------------
-          # 1. Download sources
+          # 1. Download all sources
           # ---------------------------------------------------------------
           cd /tmp
 
@@ -64,10 +69,17 @@ jobs:
           wget -q "https://github.com/winshining/nginx-http-flv-module/archive/refs/tags/v${FLV_VERSION}.tar.gz"
           tar -xzf "v${FLV_VERSION}.tar.gz"
 
-          echo "==> Downloading PCRE2 ..."
-          PCRE2_VERSION="10.44"
+          echo "==> Downloading PCRE2 ${PCRE2_VERSION} ..."
           wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
           tar -xzf "pcre2-${PCRE2_VERSION}.tar.gz"
+
+          echo "==> Downloading zlib ${ZLIB_VERSION} ..."
+          wget -q "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz"
+          tar -xzf "zlib-${ZLIB_VERSION}.tar.gz"
+
+          echo "==> Downloading OpenSSL ${OPENSSL_VERSION} ..."
+          wget -q "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          tar -xzf "openssl-${OPENSSL_VERSION}.tar.gz"
 
           # ---------------------------------------------------------------
           # 2. Configure nginx
@@ -82,11 +94,17 @@ jobs:
             --pid-path=logs/nginx.pid \
             --http-log-path=logs/access.log \
             --error-log-path=logs/error.log \
+            --http-client-body-temp-path=temp/client_body_temp \
+            --http-proxy-temp-path=temp/proxy_temp \
+            --http-fastcgi-temp-path=temp/fastcgi_temp \
+            --http-scgi-temp-path=temp/scgi_temp \
+            --http-uwsgi-temp-path=temp/uwsgi_temp \
             --with-cc-opt="-O2 -fno-strict-aliasing -Wno-error" \
             --with-ld-opt="-Wl,-s" \
             --with-pcre="/tmp/pcre2-${PCRE2_VERSION}" \
+            --with-zlib="/tmp/zlib-${ZLIB_VERSION}" \
+            --with-openssl="/tmp/openssl-${OPENSSL_VERSION}" \
             --with-select_module \
-            --with-poll_module \
             --with-http_ssl_module \
             --with-http_realip_module \
             --with-http_addition_module \
@@ -122,20 +140,16 @@ jobs:
           cp -r "/tmp/nginx-${NGINX_VERSION}/html/"* "$BUILD_DIR/html/"
 
           # ---------------------------------------------------------------
-          # 5. Bundle required MinGW DLLs
+          # 5. Bundle required MinGW runtime DLLs
           # ---------------------------------------------------------------
           echo "==> Bundling DLL dependencies ..."
           cd "$BUILD_DIR"
 
-          # Copy known runtime DLLs from MSYS2 MinGW
+          # Copy MinGW runtime DLLs (nginx is statically linked against
+          # PCRE2/zlib/OpenSSL, but still needs GCC runtime DLLs)
           for pattern in \
             /mingw32/bin/libgcc_s_dw2-1.dll \
-            /mingw32/bin/libwinpthread-1.dll \
-            /mingw32/bin/libpcre-1.dll \
-            /mingw32/bin/libpcre2-*.dll \
-            /mingw32/bin/zlib1.dll \
-            /mingw32/bin/libssl-*.dll \
-            /mingw32/bin/libcrypto-*.dll; do
+            /mingw32/bin/libwinpthread-1.dll; do
             for f in $pattern; do
               [ -f "$f" ] && { echo "  → $(basename $f)"; cp "$f" ./; }
             done 2>/dev/null || true
@@ -168,7 +182,6 @@ jobs:
           cd /c/nginx-build
           zip -r "/c/${ARCHIVE}" ./*
 
-          # Copy to workspace (current dir is the repo root in msys2 shell)
           cp "/c/${ARCHIVE}" "./${ARCHIVE}"
           echo "Archive ready: ${ARCHIVE}"
 
@@ -187,6 +200,11 @@ jobs:
             - FLV, MP4, Gunzip, Gzip Static
             - Auth Request, Random Index, Secure Link, Slice, Stub Status
             - **nginx-http-flv-module** (live FLV streaming)
+
+            ### Libraries (statically linked from source)
+            - PCRE2 ${{ env.PCRE2_VERSION }}
+            - zlib ${{ env.ZLIB_VERSION }}
+            - OpenSSL ${{ env.OPENSSL_VERSION }}
 
             ### Build environment
             - Runner: `windows-latest` (GitHub Actions)
