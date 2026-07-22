@@ -179,44 +179,56 @@ jobs:
           echo "==> Build directory contents:"
           ls -la "$BUILD_DIR/"
 
-      - name: Package zip archive
+      - name: Package and upload to Release
         shell: msys2 {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           NGINX_VERSION="${{ github.event.inputs.nginx_version }}"
+          FLV_VERSION="${{ github.event.inputs.flv_module_version }}"
           ARCHIVE="nginx-x86-windows-flv-${NGINX_VERSION}.zip"
+          TAG="nginx-x86-windows-flv-${NGINX_VERSION}"
 
+          # Package
           cd /c/nginx-build
           zip -r "/c/${ARCHIVE}" ./*
 
-          cp "/c/${ARCHIVE}" "./${ARCHIVE}"
-          echo "Archive ready: ${ARCHIVE}"
+          # Copy to workspace (convert Windows path -> MSYS2 path via cygpath)
+          WORKSPACE="$(cygpath -u "$GITHUB_WORKSPACE")"
+          cp "/c/${ARCHIVE}" "${WORKSPACE}/${ARCHIVE}"
+          echo "Archive ready: $(ls -lh "${WORKSPACE}/${ARCHIVE}")"
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nginx-x86-windows-flv-${{ github.event.inputs.nginx_version }}
-          name: nginx ${{ github.event.inputs.nginx_version }} (x86 Windows) with flv module
-          body: |
-            ## nginx ${{ github.event.inputs.nginx_version }} (x86 Windows)
+          # Create / update Release and upload asset via gh CLI
+          gh release view "$TAG" >/dev/null 2>&1 && RELEASE_EXISTS=1 || RELEASE_EXISTS=0
 
-            Bundled with [nginx-http-flv-module](https://github.com/winshining/nginx-http-flv-module) **v${{ github.event.inputs.flv_module_version }}**.
+          if [ "$RELEASE_EXISTS" = "1" ]; then
+            echo "Release $TAG already exists, uploading asset..."
+            gh release upload "$TAG" "${WORKSPACE}/${ARCHIVE}" --clobber
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" "${WORKSPACE}/${ARCHIVE}" \
+              --title "nginx ${NGINX_VERSION} (x86 Windows) with flv module" \
+              --notes "$(cat <<EOF
+          ## nginx ${NGINX_VERSION} (x86 Windows)
 
-            ### Built-in modules
-            - SSL, RealIP, Addition, Substitution, WebDAV
-            - FLV, MP4, Gunzip, Gzip Static
-            - Auth Request, Random Index, Secure Link, Slice, Stub Status
-            - **nginx-http-flv-module** (live FLV streaming)
+          Bundled with [nginx-http-flv-module](https://github.com/winshining/nginx-http-flv-module) **v${FLV_VERSION}**.
 
-            ### Libraries (statically linked from source)
-            - PCRE2 ${{ env.PCRE2_VERSION }}
-            - zlib ${{ env.ZLIB_VERSION }}
-            - OpenSSL ${{ env.OPENSSL_VERSION }}
+          ### Built-in modules
+          - SSL, RealIP, Addition, Substitution, WebDAV
+          - FLV, MP4, Gunzip, Gzip Static
+          - Auth Request, Random Index, Secure Link, Slice, Stub Status
+          - **nginx-http-flv-module** (live FLV streaming)
 
-            ### Build environment
-            - Runner: `windows-latest` (GitHub Actions)
-            - Toolchain: MSYS2 MINGW32 (i686 / x86)
-            - Workflow run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          files: nginx-x86-windows-flv-${{ github.event.inputs.nginx_version }}.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ### Libraries (statically linked from source)
+          - PCRE2 ${{ env.PCRE2_VERSION }}
+          - zlib ${{ env.ZLIB_VERSION }}
+          - OpenSSL ${{ env.OPENSSL_VERSION }}
+
+          ### Build environment
+          - Runner: \`windows-latest\` (GitHub Actions)
+          - Toolchain: MSYS2 MINGW32 (i686 / x86)
+          - Workflow run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+          )"
+          fi
