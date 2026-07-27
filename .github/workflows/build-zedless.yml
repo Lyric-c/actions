@@ -71,6 +71,17 @@ jobs:
           cd zedless
           python3 patch.py
 
+      - name: Post-patch fixups（清理残留的已删除函数调用）
+        run: |
+          cd zedless/source
+          # 清理 download_server_binary_locally 的残留调用点
+          # zedless 删除了函数声明，但部分调用点未被清除，导致类型推断失败
+          find crates/ -name '*.rs' -exec sed -i \
+            's|\.download_server_binary_locally([^)]*)\.[^;]*;|/* zedless: removed */;|g' {} +
+          # 清理其他可能残留的 banned 函数调用
+          find crates/ -name '*.rs' -exec sed -i \
+            's|\.upload_local_server_binary([^)]*)\.[^;]*;|/* zedless: removed */;|g' {} +
+
       - name: 打包精简后的源码
         run: |
           cd zedless
@@ -115,6 +126,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "source"
+
+      - name: 额外修复（确保已删除函数的调用点被清理）
+        run: |
+          cd source
+          sed -i '' 's|\.download_server_binary_locally([^)]*)\.[^;]*;|/* zedless: removed */;|g' \
+            crates/remote/src/transport/wsl.rs 2>/dev/null || true
 
       - name: 构建 Zedless DMG (aarch64)
         run: |
@@ -164,6 +181,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "source"
+
+      - name: 修复 VS 路径（windows-latest 使用 Enterprise 而非 Community）
+        shell: pwsh
+        run: |
+          (Get-Content source/script/bundle-windows.ps1) -replace 'Community', 'Enterprise' | Set-Content source/script/bundle-windows.ps1
 
       - name: 构建 Zedless Windows 安装包 (x86_64)
         run: |
