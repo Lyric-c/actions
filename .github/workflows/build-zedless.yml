@@ -1,0 +1,234 @@
+# 使用 zedless (https://github.com/zedless-editor/zedless) 精简 zed 源码
+# 然后构建 macOS (aarch64) 和 Windows (x86_64) 原生版本
+name: build-zedless
+
+on:
+  workflow_dispatch:
+    inputs:
+      zed_tag:
+        description: 'Zed 上游 tag（如 v1.4.4）。留空则使用 zedless 默认值'
+        required: false
+        type: string
+      release_channel:
+        description: 'Release channel'
+        required: true
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - stable
+          - preview
+          - dev
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ============================================================
+  # Job 1: 在 Ubuntu 上准备 zedless 精简后的源码
+  # ============================================================
+  prepare-source:
+    runs-on: ubuntu-latest
+    outputs:
+      zed_tag: ${{ steps.resolve.outputs.zed_tag }}
+      zed_version: ${{ steps.resolve.outputs.zed_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 patch 依赖
+        run: |
+          npm install -g @ast-grep/cli
+          pip install toml
+
+      - name: 克隆 zedless
+        run: git clone --depth 1 https://github.com/zedless-editor/zedless.git
+
+      - name: 解析 zed tag 和版本号
+        id: resolve
+        run: |
+          cd zedless
+          DEFAULT_TAG=$(python3 -c "import json; print(json.load(open('source-info.json'))['tag'])")
+          TAG="${INPUT_TAG:-$DEFAULT_TAG}"
+          echo "zed_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "zed_version=${TAG#v}" >> $GITHUB_OUTPUT
+        env:
+          INPUT_TAG: ${{ github.event.inputs.zed_tag }}
+
+      - name: 下载 zed 源码
+        run: |
+          cd zedless
+          TAG="${{ steps.resolve.outputs.zed_tag }}"
+          git clone --depth 1 --branch "$TAG" https://github.com/zed-industries/zed.git source
+          cd source
+          # 尝试初始化子模块（非必需，但有助于构建完整性）
+          git submodule update --init --depth 1 2>/dev/null || echo "子模块初始化跳过（非关键）"
+
+      - name: 应用 zedless patch
+        run: |
+          cd zedless
+          python3 patch.py
+
+      - name: 打包精简后的源码
+        run: |
+          cd zedless
+          tar -czf ../patched-source.tar.gz \
+            --exclude='.git' \
+            source/
+
+      - name: 上传精简后的源码
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-source
+          path: patched-source.tar.gz
+          retention-days: 1
+
+  # ============================================================
+  # Job 2: 在 macOS 上构建 aarch64 (Apple Silicon) DMG
+  # ============================================================
+  build-macos:
+    needs: [prepare-source]
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - name: 下载精简源码
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-source
+
+      - name: 解压源码
+        run: tar -xzf patched-source.tar.gz
+
+      - name: 设置 release channel
+        run: |
+          mkdir -p source/crates/zed
+          echo "${{ github.event.inputs.release_channel || 'nightly' }}" > source/crates/zed/RELEASE_CHANNEL
+
+      - name: 安装 Node.js（bundle-mac 需要 dmg-license）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 缓存 Rust 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "source"
+
+      - name: 构建 Zedless DMG (aarch64)
+        run: |
+          cd source
+          ./script/bundle-mac aarch64-apple-darwin
+
+      - name: 上传 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zedless-aarch64-dmg
+          path: source/target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+          if-no-files-found: warn
+
+  # ============================================================
+  # Job 3: 在 Windows 上构建 x86_64 安装包
+  # ============================================================
+  build-windows:
+    needs: [prepare-source]
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: 下载精简源码
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-source
+
+      - name: 解压源码
+        run: tar -xzf patched-source.tar.gz
+
+      - name: 设置 release channel
+        run: |
+          New-Item -ItemType Directory -Path "source/crates/zed" -Force | Out-Null
+          "${{ github.event.inputs.release_channel || 'nightly' }}" | Set-Content -Path "source/crates/zed/RELEASE_CHANNEL"
+
+      - name: 设置构建环境变量
+        run: |
+          $workspace = (Resolve-Path "source").Path
+          $version = "${{ needs.prepare-source.outputs.zed_version }}"
+          echo "ZED_WORKSPACE=$workspace" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "ZED_RELEASE_CHANNEL=${{ github.event.inputs.release_channel || 'nightly' }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: 缓存 Rust 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "source"
+
+      - name: 构建 Zedless Windows 安装包 (x86_64)
+        run: |
+          cd source
+          script/bundle-windows.ps1 -Architecture x86_64
+
+      - name: 上传 Windows 安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zedless-x86_64-exe
+          path: source/target/Zed-x86_64.exe
+          if-no-files-found: warn
+
+  # ============================================================
+  # Job 4: 创建 GitHub Release 并上传所有构建产物
+  # ============================================================
+  create-release:
+    needs: [prepare-source, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理 release 文件
+        run: |
+          mkdir -p release-files
+          # macOS DMG
+          if [ -f "artifacts/Zedless-aarch64-dmg/Zed-aarch64.dmg" ]; then
+            cp "artifacts/Zedless-aarch64-dmg/Zed-aarch64.dmg" "release-files/Zedless-aarch64.dmg"
+          fi
+          # Windows installer
+          if [ -f "artifacts/Zedless-x86_64-exe/Zed-x86_64.exe" ]; then
+            cp "artifacts/Zedless-x86_64-exe/Zed-x86_64.exe" "release-files/Zedless-x86_64.exe"
+          fi
+          echo "=== Release files ==="
+          ls -lh release-files/
+
+      - name: 创建 Release 并上传
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: zedless-${{ needs.prepare-source.outputs.zed_tag }}-${{ github.run_number }}
+          name: Zedless ${{ needs.prepare-source.outputs.zed_tag }} Build ${{ github.run_number }}
+          body: |
+            ## Zedless 构建
+
+            - 上游 Zed: **${{ needs.prepare-source.outputs.zed_tag }}**
+            - Channel: **${{ github.event.inputs.release_channel || 'nightly' }}**
+            - 构建编号: **${{ github.run_number }}**
+
+            ### 下载
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | macOS | Apple Silicon (M1/M2/M3/M4) | `Zedless-aarch64.dmg` |
+            | Windows | x86_64 | `Zedless-x86_64.exe` |
+
+            ### 关于 Zedless
+
+            [Zedless](https://github.com/zedless-editor/zedless) 是一个注重隐私和本地优先的 Zed 分支。
+            本构建由 zedless 精简上游 Zed 源码后编译生成。
+          files: release-files/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
