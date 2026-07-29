@@ -16,7 +16,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          repository: https://github.com/NikolayS/PGSimCity
+          repository: NikolayS/PGSimCity
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
