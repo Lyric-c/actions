@@ -1,0 +1,224 @@
+name: build nginx windows x86 with flv module
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: 'nginx version to build (e.g. 1.26.2)'
+        required: true
+        default: '1.26.2'
+        type: string
+      flv_module_version:
+        description: 'nginx-http-flv-module version (e.g. 1.2.13)'
+        required: true
+        default: '1.2.13'
+        type: string
+
+env:
+  PCRE2_VERSION: "10.44"
+  ZLIB_VERSION: "1.3.2"
+  OPENSSL_VERSION: "3.0.16"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    name: Build nginx x86 with flv module
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (MINGW32)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-binutils
+            make
+            perl
+            wget
+            unzip
+            zip
+
+      - name: Download sources and build nginx
+        shell: msys2 {0}
+        run: |
+          set -eu
+
+          NGINX_VERSION="${{ github.event.inputs.nginx_version }}"
+          FLV_VERSION="${{ github.event.inputs.flv_module_version }}"
+          PCRE2_VERSION="${{ env.PCRE2_VERSION }}"
+          ZLIB_VERSION="${{ env.ZLIB_VERSION }}"
+          OPENSSL_VERSION="${{ env.OPENSSL_VERSION }}"
+
+          echo "=== Building nginx ${NGINX_VERSION} with nginx-http-flv-module ${FLV_VERSION} ==="
+
+          # ---------------------------------------------------------------
+          # 1. Download all sources
+          # ---------------------------------------------------------------
+          cd /tmp
+
+          echo "==> Downloading nginx ${NGINX_VERSION} ..."
+          wget -q "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+
+          echo "==> Downloading nginx-http-flv-module v${FLV_VERSION} ..."
+          wget -q "https://github.com/winshining/nginx-http-flv-module/archive/refs/tags/v${FLV_VERSION}.tar.gz"
+          tar -xzf "v${FLV_VERSION}.tar.gz"
+
+          # Fix: MinGW's stdint.h already provides int8_t/uint8_t;
+          # the module's redefinition conflicts with GCC 16 on MINGW32
+          sed -i '/typedef __int8.*int8_t;/d' \
+            "/tmp/nginx-http-flv-module-${FLV_VERSION}/ngx_rtmp.h"
+          sed -i '/typedef unsigned __int8.*uint8_t;/d' \
+            "/tmp/nginx-http-flv-module-${FLV_VERSION}/ngx_rtmp.h"
+
+          echo "==> Downloading PCRE2 ${PCRE2_VERSION} ..."
+          wget -q "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
+          tar -xzf "pcre2-${PCRE2_VERSION}.tar.gz"
+
+          echo "==> Downloading zlib ${ZLIB_VERSION} ..."
+          wget -q "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
+          tar -xzf "zlib-${ZLIB_VERSION}.tar.gz"
+
+          echo "==> Downloading OpenSSL ${OPENSSL_VERSION} ..."
+          wget -q "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          tar -xzf "openssl-${OPENSSL_VERSION}.tar.gz"
+
+          # ---------------------------------------------------------------
+          # 2. Configure nginx
+          # ---------------------------------------------------------------
+          cd "/tmp/nginx-${NGINX_VERSION}"
+
+          echo "==> Configuring nginx ..."
+          ./configure \
+            --prefix= \
+            --sbin-path=nginx.exe \
+            --conf-path=conf/nginx.conf \
+            --pid-path=logs/nginx.pid \
+            --http-log-path=logs/access.log \
+            --error-log-path=logs/error.log \
+            --http-client-body-temp-path=temp/client_body_temp \
+            --http-proxy-temp-path=temp/proxy_temp \
+            --http-fastcgi-temp-path=temp/fastcgi_temp \
+            --http-scgi-temp-path=temp/scgi_temp \
+            --http-uwsgi-temp-path=temp/uwsgi_temp \
+            --with-cc-opt="-O2 -fno-strict-aliasing -Wno-error" \
+            --with-ld-opt="-Wl,-s" \
+            --with-pcre="/tmp/pcre2-${PCRE2_VERSION}" \
+            --with-zlib="/tmp/zlib-${ZLIB_VERSION}" \
+            --with-openssl="/tmp/openssl-${OPENSSL_VERSION}" \
+            --with-select_module \
+            --with-http_ssl_module \
+            --with-http_realip_module \
+            --with-http_addition_module \
+            --with-http_sub_module \
+            --with-http_dav_module \
+            --with-http_flv_module \
+            --with-http_mp4_module \
+            --with-http_gunzip_module \
+            --with-http_gzip_static_module \
+            --with-http_auth_request_module \
+            --with-http_random_index_module \
+            --with-http_secure_link_module \
+            --with-http_slice_module \
+            --with-http_stub_status_module \
+            --add-module="/tmp/nginx-http-flv-module-${FLV_VERSION}"
+
+          # ---------------------------------------------------------------
+          # 3. Compile
+          # ---------------------------------------------------------------
+          echo "==> Compiling nginx ..."
+          make -j$(nproc)
+
+          # ---------------------------------------------------------------
+          # 4. Install to a clean directory
+          # ---------------------------------------------------------------
+          echo "==> Installing nginx ..."
+          BUILD_DIR="/c/nginx-build"
+          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR/conf" "$BUILD_DIR/logs" "$BUILD_DIR/html"
+
+          cp "/tmp/nginx-${NGINX_VERSION}/objs/nginx.exe" "$BUILD_DIR/"
+          cp -r "/tmp/nginx-${NGINX_VERSION}/conf/"* "$BUILD_DIR/conf/"
+          cp -r "/tmp/nginx-${NGINX_VERSION}/html/"* "$BUILD_DIR/html/"
+
+          # ---------------------------------------------------------------
+          # 5. Bundle required MinGW runtime DLLs
+          # ---------------------------------------------------------------
+          echo "==> Bundling DLL dependencies ..."
+          cd "$BUILD_DIR"
+
+          # Copy MinGW runtime DLLs (nginx is statically linked against
+          # PCRE2/zlib/OpenSSL, but still needs GCC runtime DLLs)
+          for pattern in \
+            /mingw32/bin/libgcc_s_dw2-1.dll \
+            /mingw32/bin/libwinpthread-1.dll; do
+            for f in $pattern; do
+              [ -f "$f" ] && { echo "  → $(basename $f)"; cp "$f" ./; }
+            done 2>/dev/null || true
+          done
+
+          # Verify and copy any missing DLLs reported by objdump
+          echo "==> Verifying DLL dependencies ..."
+          objdump -p nginx.exe | grep "DLL Name" | awk '{print $3}' | while IFS= read -r dll; do
+            if [ ! -f "$dll" ]; then
+              found=$(find /mingw32/bin -maxdepth 1 -name "$dll" 2>/dev/null | head -1)
+              if [ -n "$found" ]; then
+                echo "  → (extra) $(basename $found)"
+                cp "$found" ./
+              else
+                echo "  ⚠ NOT FOUND: $dll"
+              fi
+            fi
+          done
+
+          echo "==> Build directory contents:"
+          ls -la "$BUILD_DIR/"
+
+      - name: Package zip archive
+        shell: msys2 {0}
+        run: |
+          set -eu
+          NGINX_VERSION="${{ github.event.inputs.nginx_version }}"
+          ARCHIVE="nginx-x86-windows-flv-${NGINX_VERSION}.zip"
+
+          cd /c/nginx-build
+          zip -r "/c/${ARCHIVE}" ./*
+
+          # Copy to workspace (convert Windows path -> MSYS2 path via cygpath)
+          WORKSPACE="$(cygpath -u "$GITHUB_WORKSPACE")"
+          cp "/c/${ARCHIVE}" "${WORKSPACE}/${ARCHIVE}"
+          echo "Archive ready: $(ls -lh "${WORKSPACE}/${ARCHIVE}")"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nginx-x86-windows-flv-${{ github.event.inputs.nginx_version }}
+          name: nginx ${{ github.event.inputs.nginx_version }} (x86 Windows) with flv module
+          body: |
+            ## nginx ${{ github.event.inputs.nginx_version }} (x86 Windows)
+
+            Bundled with [nginx-http-flv-module](https://github.com/winshining/nginx-http-flv-module) **v${{ github.event.inputs.flv_module_version }}**.
+
+            ### Built-in modules
+            - SSL, RealIP, Addition, Substitution, WebDAV
+            - FLV, MP4, Gunzip, Gzip Static
+            - Auth Request, Random Index, Secure Link, Slice, Stub Status
+            - **nginx-http-flv-module** (live FLV streaming)
+
+            ### Libraries (statically linked from source)
+            - PCRE2 ${{ env.PCRE2_VERSION }}
+            - zlib ${{ env.ZLIB_VERSION }}
+            - OpenSSL ${{ env.OPENSSL_VERSION }}
+
+            ### Build environment
+            - Runner: `windows-latest` (GitHub Actions)
+            - Toolchain: MSYS2 MINGW32 (i686 / x86)
+            - Workflow run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          files: nginx-x86-windows-flv-${{ github.event.inputs.nginx_version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
