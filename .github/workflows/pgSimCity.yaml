@@ -36,7 +36,7 @@ jobs:
         run: npm run build
 
       - name: Compress file
-        run: tar -zcvf pgsimcity.tar.gz ./disk/*
+        run: tar -zcvf pgsimcity.tar.gz ./dist/*
       
       - name: Upload
         uses: actions/attest@v4
