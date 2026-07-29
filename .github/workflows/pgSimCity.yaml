@@ -38,7 +38,8 @@ jobs:
       - name: Compress file
         run: tar -zcvf pgsimcity.tar.gz ./dist/*
       
-      - name: Upload
-        uses: actions/attest@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4 
         with:
-          subject-path: './pgsimcity.tar.gz'
+          name: my-build-artifact
+          path: ./pgsimcity.tar.gz
