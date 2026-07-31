@@ -1,12 +1,12 @@
 name: Build ffmpeg-rockchip-arm64
 
-on:
-  workflow_dispatch:
-
 permissions:
   id-token: write
   attestations: write
   artifact-metadata: write
+
+on:
+  workflow_dispatch:
 
 jobs:
   build:
