@@ -38,7 +38,7 @@ jobs:
 
       - name: Build RGA
         run: |
-          git clone -b jellyfin-rga --depth=1 https://github.com/nyanmisaka/rga.git rkrga
+          git clone -b jellyfin-rga --depth=1 https://github.com/nyanmisaka/rk-mirrors.git rkrga
           meson setup rkrga rkrga_build \
             --prefix=/usr \
             --libdir=lib \
