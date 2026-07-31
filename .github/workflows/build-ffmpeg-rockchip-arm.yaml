@@ -20,7 +20,7 @@ jobs:
 
       - name: Build MPP
         run: |
-          git clone -b jellyfin-mpp --depth=1 https://gitee.com/nyanmisaka/mpp.git rkmpp
+          git clone -b jellyfin-mpp --depth=1 https://github.com/nyanmisaka/mpp.git rkmpp
           pushd rkmpp
           mkdir rkmpp_build
           pushd rkmpp_build
@@ -38,7 +38,7 @@ jobs:
 
       - name: Build RGA
         run: |
-          git clone -b jellyfin-rga --depth=1 https://gitee.com/nyanmisaka/rga.git rkrga
+          git clone -b jellyfin-rga --depth=1 https://github.com/nyanmisaka/rga.git rkrga
           meson setup rkrga rkrga_build \
             --prefix=/usr \
             --libdir=lib \
