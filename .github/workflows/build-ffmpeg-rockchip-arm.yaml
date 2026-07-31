@@ -1,7 +1,7 @@
 name: Build ffmpeg-rockchip-arm64
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
 
 permissions:
   id-token: write
