@@ -32,37 +32,36 @@ jobs:
           popd
           popd
 
-        - name: Build RGA
-          env: DESTDIR=bulid
-          run: |
-            git clone -b jellyfin-rga --depth=1 https://gitee.com/nyanmisaka/rga.git rkrga
-            meson setup rkrga rkrga_build \
-              --prefix=/usr \
-              --libdir=lib \
-              --buildtype=release \
-              --default-library=shared \
-              -Dcpp_args=-fpermissive \
-              -Dlibdrm=false \
-              -Dlibrga_demo=false
-            meson configure rkrga_build
-            ninja -C rkrga_build install
+      - name: Build RGA
+        env: DESTDIR=bulid
+        run: |
+          git clone -b jellyfin-rga --depth=1 https://gitee.com/nyanmisaka/rga.git rkrga
+          meson setup rkrga rkrga_build \
+            --prefix=/usr \
+            --libdir=lib \
+            --buildtype=release \
+            --default-library=shared \
+            -Dcpp_args=-fpermissive \
+            -Dlibdrm=false \
+            -Dlibrga_demo=false
+          meson configure rkrga_build
+          ninja -C rkrga_build install
 
-        - name: Build the minimal FFmpeg
-             run: |
-               git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg
-               pushd ffmpeg
-               ./configure --prefix=/usr --enable-gpl --enable-version3 --enable-libdrm --enable-rkmpp --enable-rkrga
-               make -j $(nproc)
-               # Try the compiled FFmpeg without installation
-               ./ffmpeg -decoders | grep rkmpp
-               ./ffmpeg -encoders | grep rkmpp
-               ./ffmpeg -filters | grep rkrga
+      - name: Build the minimal FFmpeg
+        run: |
+          git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg
+          pushd ffmpeg
+          ./configure --prefix=/usr --enable-gpl --enable-version3 --enable-libdrm --enable-rkmpp --enable-rkrga
+          make -j $(nproc)
+          ./ffmpeg -decoders | grep rkmpp
+          ./ffmpeg -encoders | grep rkmpp
+          ./ffmpeg -filters | grep rkrga
 
-                make install DESTDIR=../build
-                popd
+          make install DESTDIR=../build
+          popd
                 
-        - name: Upload artifact
-          uses: actions/upload-artifact@v7
-           with:
-            name: pgsimcity
-            path: ./build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pgsimcity
+          path: ./build
