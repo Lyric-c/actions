@@ -1,0 +1,42 @@
+name: build pgSimCity
+
+permissions:
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: NikolayS/PGSimCity
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+      
+      - name: Change Path
+        run: sed '/^[[:space:]]*base:/ s#\./#/pg/#' vite.config.ts
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pgsimcity
+          path: ./dist/*
