@@ -1,0 +1,19 @@
+# Meson cross-compilation file for aarch64 (arm64)
+# 用法: meson setup builddir srcdir --cross-file=/path/to/cross-arm64.meson ...
+# 源自 nyanmisaka/jellyfin-ffmpeg 的官方 cross-arm64.meson（原样保留）
+
+[binaries]
+c = '/usr/bin/aarch64-linux-gnu-gcc'
+cpp = '/usr/bin/aarch64-linux-gnu-g++'
+ar = '/usr/bin/aarch64-linux-gnu-gcc-ar'
+ld = '/usr/bin/aarch64-linux-gnu-ld'
+strip = '/usr/bin/aarch64-linux-gnu-strip'
+ranlib = '/usr/bin/aarch64-linux-gnu-gcc-ranlib'
+nm = '/usr/bin/aarch64-linux-gnu-gcc-nm'
+pkg-config = 'pkg-config'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'

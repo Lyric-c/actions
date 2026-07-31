@@ -1,0 +1,147 @@
+# Build ffmpeg-rockchip (MPP + RGA + FFmpeg) for arm64 via cross-compilation
+#
+# 用法:
+#   1. fork 本仓库（或直接复用此 workflow 文件）
+#   2. GitHub → Actions → "Build ffmpeg-rockchip (arm64)" → Run workflow
+#   3. 手动触发时可选择 MPP/RGA 分支（稳定版 jellyfin-mpp / 激进版 jellyfin-mpp-next）
+#   4. 构建完成后在 workflow run 页面下载 artifact:
+#      - ffmpeg-rockchip-arm64.tar.gz        → 裸机部署（解压即用）
+#      - ffmpeg-rockchip-arm64-docker.tar.gz → docker load 后作为镜像运行
+#
+# 产物为自包含目录（/opt/ffmpeg-rockchip/{bin,lib,include}），
+# RPATH 已指向 ../lib，运行时无需 LD_LIBRARY_PATH（部署脚本里仍建议加，双保险）。
+
+name: Build ffmpeg-rockchip (arm64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mpp_branch:
+        description: 'MPP 分支 (rockchip_mpp)'
+        type: choice
+        default: jellyfin-mpp
+        options:
+          - jellyfin-mpp
+          - jellyfin-mpp-next
+      rga_branch:
+        description: 'RGA 分支 (librga)'
+        type: choice
+        default: jellyfin-rga
+        options:
+          - jellyfin-rga
+          - jellyfin-rga-next
+      ffmpeg_ref:
+        description: 'ffmpeg-rockchip 的 commit/tag（留空=master）'
+        type: string
+        default: master
+      build_docker:
+        description: '同时构建 arm64 docker 镜像（docker save 产物）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout（获取 ci/ 交叉编译配置）
+        uses: actions/checkout@v4
+
+      - name: 安装 arm64 交叉工具链与依赖
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross pkg-config-aarch64-linux-gnu \
+            libdrm-dev:arm64 \
+            cmake meson ninja-build \
+            qemu-user
+
+      - name: 编译 RKMPP
+        env:
+          MPP_BRANCH: ${{ inputs.mpp_branch }}
+        run: |
+          git clone -b "${MPP_BRANCH}" --depth=1 https://github.com/nyanmisaka/rk-mirrors.git rkmpp
+          cmake -S rkmpp -B rkmpp/build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/ffmpeg-rockchip/ci/toolchain-arm64.cmake" \
+            -DCMAKE_INSTALL_PREFIX=/opt/ffmpeg-rockchip \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON -DBUILD_TEST=OFF
+          cmake --build rkmpp/build -j$(nproc)
+          sudo cmake --install rkmpp/build
+
+      - name: 编译 RKRGA
+        env:
+          RGA_BRANCH: ${{ inputs.rga_branch }}
+        run: |
+          git clone -b "${RGA_BRANCH}" --depth=1 https://github.com/nyanmisaka/rk-mirrors.git rkrga
+          meson setup rkrga/build rkrga \
+            --cross-file="$GITHUB_WORKSPACE/ffmpeg-rockchip/ci/cross-arm64.meson" \
+            --prefix=/opt/ffmpeg-rockchip --libdir=lib \
+            --buildtype=release --default-library=shared \
+            -Dcpp_args=-fpermissive -Dlibdrm=false -Dlibrga_demo=false
+          ninja -C rkrga/build
+          sudo ninja -C rkrga/build install
+
+      - name: 编译 ffmpeg-rockchip
+        env:
+          FFMPEG_REF: ${{ inputs.ffmpeg_ref }}
+        run: |
+          REF_ARG=""
+          if [ -n "${FFMPEG_REF}" ] && [ "${FFMPEG_REF}" != "master" ]; then
+            REF_ARG="--branch ${FFMPEG_REF}"
+          fi
+          git clone --depth=1 ${REF_ARG} https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg
+          cd ffmpeg
+          export PKG_CONFIG_PATH=/opt/ffmpeg-rockchip/lib/pkgconfig
+          # RPATH 三层转义: bash 单引号(原样) → make 展开 $$→$ → shell 执行 \$→$
+          # 最终 ld 收到字面 $ORIGIN，动态链接器按可执行文件位置解析 ../lib
+          ./configure \
+            --prefix=/opt/ffmpeg-rockchip \
+            --target-os=linux --arch=arm64 \
+            --cross-prefix=aarch64-linux-gnu- --enable-cross-compile \
+            --enable-shared --disable-static --disable-doc --disable-ffplay \
+            --enable-gpl --enable-version3 \
+            --enable-libdrm --enable-rkmpp --enable-rkrga \
+            --pkg-config=aarch64-linux-gnu-pkg-config \
+            --extra-cflags="-I/opt/ffmpeg-rockchip/include" \
+            --extra-ldflags='-L/opt/ffmpeg-rockchip/lib -Wl,-rpath,\$$ORIGIN/../lib'
+          make -j$(nproc)
+          sudo make install
+
+      - name: 补齐运行时依赖（libdrm 进产物，保持自包含）
+        run: |
+          sudo cp -a /usr/lib/aarch64-linux-gnu/libdrm.so* /opt/ffmpeg-rockchip/lib/
+
+      - name: 用 qemu-aarch64 验证产物
+        run: |
+          qemu-aarch64 -L /usr/aarch64-linux-gnu /opt/ffmpeg-rockchip/bin/ffmpeg -version | head -3
+          echo "rkmpp decoders: $(qemu-aarch64 -L /usr/aarch64-linux-gnu /opt/ffmpeg-rockchip/bin/ffmpeg -hide_banner -decoders 2>/dev/null | grep -c rkmpp)"
+          echo "rkrga filters: $(qemu-aarch64 -L /usr/aarch64-linux-gnu /opt/ffmpeg-rockchip/bin/ffmpeg -hide_banner -filters 2>/dev/null | grep -c rkrga)"
+
+      - name: 打包裸机部署包
+        run: |
+          tar -czf ffmpeg-rockchip-arm64.tar.gz -C /opt ffmpeg-rockchip
+
+      - name: 构建 arm64 docker 镜像（纯 COPY，无需 qemu）
+        if: ${{ inputs.build_docker }}
+        run: |
+          mkdir -p deploy/ffmpeg-rockchip
+          sudo cp -a /opt/ffmpeg-rockchip/. deploy/ffmpeg-rockchip/
+          docker buildx build --platform linux/arm64 \
+            -t ffmpeg-rockchip:arm64 \
+            -f "$GITHUB_WORKSPACE/ffmpeg-rockchip/ci/Dockerfile" \
+            deploy
+          docker save ffmpeg-rockchip:arm64 | gzip > ffmpeg-rockchip-arm64-docker.tar.gz
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-rockchip-arm64
+          path: |
+            ffmpeg-rockchip-arm64.tar.gz
+            ffmpeg-rockchip-arm64-docker.tar.gz
+          if-no-files-found: error
