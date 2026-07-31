@@ -65,6 +65,7 @@ jobs:
             --extra-cflags="-I$PWD/../build/usr/include" \
             --extra-ldflags="-L$PWD/../build/usr/lib"
           make -j $(nproc)
+          export LD_LIBRARY_PATH=$PWD/../build/usr/lib:$LD_LIBRARY_PATH
           ./ffmpeg -decoders | grep rkmpp
           ./ffmpeg -encoders | grep rkmpp
           ./ffmpeg -filters | grep rkrga
