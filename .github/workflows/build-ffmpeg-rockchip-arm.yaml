@@ -12,10 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: install dependency
-        run: sudo apt-get update && apt-get install -y libdrm-dev cmake meson ninja-build pkg-config && mkdir build
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdrm-dev cmake meson ninja-build pkg-config
+          mkdir -p build
 
-      - name: build MPP
+      - name: Build MPP
         run: |
           git clone -b jellyfin-mpp --depth=1 https://gitee.com/nyanmisaka/mpp.git rkmpp
           pushd rkmpp
@@ -23,17 +26,17 @@ jobs:
           pushd rkmpp_build
           cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=ON \
             -DBUILD_TEST=ON \
             ..
           make -j $(nproc)
-          make install DESTDIR=../../build
+          make install DESTDIR=../../build   # 安装到 ./build/usr
           popd
           popd
 
       - name: Build RGA
-        env: DESTDIR=bulid
         run: |
           git clone -b jellyfin-rga --depth=1 https://gitee.com/nyanmisaka/rga.git rkrga
           meson setup rkrga rkrga_build \
@@ -44,24 +47,32 @@ jobs:
             -Dcpp_args=-fpermissive \
             -Dlibdrm=false \
             -Dlibrga_demo=false
-          meson configure rkrga_build
-          ninja -C rkrga_build install
+          ninja -C rkrga_build
+          DESTDIR=$PWD/build ninja -C rkrga_build install   # 明确指定 DESTDIR
 
-      - name: Build the minimal FFmpeg
+      - name: Build FFmpeg
         run: |
+          export PKG_CONFIG_PATH="$PWD/build/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
           git clone --depth=1 https://github.com/nyanmisaka/ffmpeg-rockchip.git ffmpeg
           pushd ffmpeg
-          ./configure --prefix=/usr --enable-gpl --enable-version3 --enable-libdrm --enable-rkmpp --enable-rkrga
+          ./configure \
+            --prefix=/usr \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-libdrm \
+            --enable-rkmpp \
+            --enable-rkrga \
+            --extra-cflags="-I$PWD/../build/usr/include" \
+            --extra-ldflags="-L$PWD/../build/usr/lib"
           make -j $(nproc)
           ./ffmpeg -decoders | grep rkmpp
           ./ffmpeg -encoders | grep rkmpp
           ./ffmpeg -filters | grep rkrga
-
           make install DESTDIR=../build
           popd
-                
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pgsimcity
+          name: ffmpeg-rockchip-arm64
           path: ./build
