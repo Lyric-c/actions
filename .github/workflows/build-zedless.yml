@@ -71,17 +71,6 @@ jobs:
           cd zedless
           python3 patch.py
 
-      - name: Post-patch fixups（清理残留的已删除函数调用）
-        run: |
-          cd zedless/source
-          # 清理 download_server_binary_locally 的残留调用点
-          # zedless 删除了函数声明，但部分调用点未被清除，导致类型推断失败
-          find crates/ -name '*.rs' -exec sed -i \
-            's|\.download_server_binary_locally([^)]*)\.[^;]*;|/* zedless: removed */;|g' {} +
-          # 清理其他可能残留的 banned 函数调用
-          find crates/ -name '*.rs' -exec sed -i \
-            's|\.upload_local_server_binary([^)]*)\.[^;]*;|/* zedless: removed */;|g' {} +
-
       - name: 打包精简后的源码
         run: |
           cd zedless
@@ -102,7 +91,7 @@ jobs:
   build-macos:
     needs: [prepare-source]
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
       - name: 下载精简源码
         uses: actions/download-artifact@v4
@@ -120,18 +109,12 @@ jobs:
       - name: 安装 Node.js（bundle-mac 需要 dmg-license）
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
 
       - name: 缓存 Rust 依赖
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "source"
-
-      - name: 额外修复（确保已删除函数的调用点被清理）
-        run: |
-          cd source
-          sed -i '' 's|\.download_server_binary_locally([^)]*)\.[^;]*;|/* zedless: removed */;|g' \
-            crates/remote/src/transport/wsl.rs 2>/dev/null || true
 
       - name: 构建 Zedless DMG (aarch64)
         run: |
@@ -151,7 +134,7 @@ jobs:
   build-windows:
     needs: [prepare-source]
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     defaults:
       run:
         shell: pwsh
@@ -182,14 +165,28 @@ jobs:
         with:
           workspaces: "source"
 
-      - name: 修复 VS 路径（windows-latest 使用 Enterprise 而非 Community）
+      - name: 修复 VS 路径（探测实际安装的 VS 版本）
         shell: pwsh
         run: |
-          (Get-Content source/script/bundle-windows.ps1) -replace 'Community', 'Enterprise' | Set-Content source/script/bundle-windows.ps1
+          $edition = @('Enterprise','Community','Professional','BuildTools') |
+            ForEach-Object { "C:\Program Files\Microsoft Visual Studio\2022\$_" } |
+            Where-Object { Test-Path "$_\Common7\Tools\Launch-VsDevShell.ps1" } |
+            Select-Object -First 1
+          if (-not $edition) { throw "未找到 Visual Studio 2022" }
+          $editionName = Split-Path $edition -Leaf
+          $script = 'source/script/bundle-windows.ps1'
+          (Get-Content $script) `
+            -replace [regex]::Escape('2022\Community'), "2022\$editionName" `
+            | Set-Content $script
+          Write-Output "使用 VS 版本: $editionName"
 
       - name: 构建 Zedless Windows 安装包 (x86_64)
+        shell: pwsh
         run: |
           cd source
+          # 清除 CI 变量：bundle-windows.ps1 在 CI 模式下强制要求 Azure Trusted Signing
+          # 密钥并调用签名脚本；本地无证书构建必须跳过这些步骤
+          $env:CI = $null
           script/bundle-windows.ps1 -Architecture x86_64
 
       - name: 上传 Windows 安装包
