@@ -71,6 +71,14 @@ jobs:
           cd zedless
           python3 patch.py
 
+      - name: 清理 zedless 补丁残留（已删除的 Sweep 变体的引用）
+        run: |
+          cd zedless/source
+          # zedless 删除了 EditPredictionPromptFormatContent::Sweep 变体，
+          # 但 language_settings.rs 中的 match 分支未被清除
+          grep -rl 'EditPredictionPromptFormatContent::Sweep' crates \
+            | xargs -r sed -i '/EditPredictionPromptFormatContent::Sweep/d'
+
       - name: 打包精简后的源码
         run: |
           cd zedless
