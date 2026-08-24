@@ -160,12 +160,17 @@ jobs:
           echo "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "ZED_RELEASE_CHANNEL=${{ github.event.inputs.release_channel || 'nightly' }}" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: 缩短 CARGO_HOME 路径（避免 pet 依赖 checkout 超过 Windows 260 字符路径限制）
+        run: |
+          New-Item -ItemType Junction -Path "C:\cg" -Target "$env:USERPROFILE\.cargo" -Force | Out-Null
+          echo "CARGO_HOME=C:\cg" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: 缓存 Rust 依赖
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "source"
 
-      - name: 修复 VS 路径（探测实际安装的 VS 版本）
+      - name: 修复 VS 路径（vswhere 动态定位）
         shell: pwsh
         run: |
           # 用 vswhere 定位实际的 VS 安装路径，不依赖硬编码的年份/版本目录名
