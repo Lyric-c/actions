@@ -168,17 +168,21 @@ jobs:
       - name: 修复 VS 路径（探测实际安装的 VS 版本）
         shell: pwsh
         run: |
-          $edition = @('Enterprise','Community','Professional','BuildTools') |
-            ForEach-Object { "C:\Program Files\Microsoft Visual Studio\2022\$_" } |
-            Where-Object { Test-Path "$_\Common7\Tools\Launch-VsDevShell.ps1" } |
-            Select-Object -First 1
-          if (-not $edition) { throw "未找到 Visual Studio 2022" }
-          $editionName = Split-Path $edition -Leaf
+          # 用 vswhere 定位实际的 VS 安装路径，不依赖硬编码的年份/版本目录名
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "未找到 vswhere.exe" }
+          $vsRoot = (& $vswhere -latest -products * `
+            -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw "未找到 Visual Studio" }
+          $launch = Join-Path $vsRoot.Trim() 'Common7\Tools\Launch-VsDevShell.ps1'
+          if (-not (Test-Path $launch)) { throw "未找到 $launch" }
+          $hardcoded = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\Launch-VsDevShell.ps1'
           $script = 'source/script/bundle-windows.ps1'
           (Get-Content $script) `
-            -replace [regex]::Escape('2022\Community'), "2022\$editionName" `
+            -replace [regex]::Escape($hardcoded), ($launch -replace '\$', '$$') `
             | Set-Content $script
-          Write-Output "使用 VS 版本: $editionName"
+          Write-Output "使用 VS: $launch"
+          Select-String -Path $script -Pattern 'Launch-VsDevShell' | ForEach-Object Line
 
       - name: 构建 Zedless Windows 安装包 (x86_64)
         shell: pwsh
