@@ -65,7 +65,7 @@ jobs:
 
       - name: Install monorepo dependencies
         working-directory: harper-monorepo
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build harper.js
         working-directory: harper-monorepo/packages/harper.js
