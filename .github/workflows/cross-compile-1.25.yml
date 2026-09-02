@@ -30,9 +30,9 @@ jobs:
                 curl -fsSL https://github.com/loongson/build-tools/releases/download/2025.08.08/x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz \
                   | tar -Jxv -C cross-compile/loong-gcc15 --strip-components=1
 
-            - name: Download LoongArch64 Go 24.6
+            - name: Download LoongArch64 Go 25.11
               run: |
-                curl -fsSL https://ftp.loongnix.cn/toolchain/golang/go-1.24/abi1.0/go1.24.11.linux-amd64.tar.gz \
+                curl -fsSL https://ftp.loongnix.cn/toolchain/golang/go-1.25/abi1.0/go1.25.11.linux-amd64.tar.gz \
                   | tar -zxv -C cross-compile/loong-go --strip-components=1
             
             - name: Build Docker image
@@ -57,7 +57,7 @@ jobs:
                     Build With:
                     - LoongArch64 GCC 8.3.0 Cross Toolchain
                     - LoongArch64 GCC 15.1.0 Cross Toolchain
-                    - LoongArch64 Go 24.6
+                    - LoongArch64 Go 25.11
                 files: cross-compile.tar.gz
                 generate_release_notes: true
 
