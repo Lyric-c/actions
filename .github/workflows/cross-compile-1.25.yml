@@ -1,4 +1,4 @@
-name: build cross-compile docker images
+name: build cross-compile docker images for go-1.25
 
 permissions:
   contents: write
