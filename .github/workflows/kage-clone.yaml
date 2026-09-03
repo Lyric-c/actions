@@ -1,0 +1,198 @@
+name: kage clone website to artifact
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: "Website URL to clone (e.g. https://paulgraham.com)"
+        required: true
+        type: string
+      max_depth:
+        description: "Maximum crawl depth (0 = no limit)"
+        required: false
+        type: number
+        default: 0
+      max_pages:
+        description: "Maximum number of pages to clone (0 = no limit)"
+        required: false
+        type: number
+        default: 0
+      scope_prefix:
+        description: "Only crawl this path prefix (e.g. /doc)"
+        required: false
+        type: string
+        default: ""
+      subdomains:
+        description: "Include subdomains in scope"
+        required: false
+        type: boolean
+        default: false
+      scroll:
+        description: "Auto-scroll pages to trigger lazy loading"
+        required: false
+        type: boolean
+        default: false
+      output_name:
+        description: "Name for the output artifact (without extension)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  clone-and-upload:
+    runs-on: ubuntu-latest
+    name: Clone Website with Kage
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract hostname from URL
+        id: extract-host
+        run: |
+          SITE_URL="${{ github.event.inputs.site }}"
+          # Strip scheme and trailing path
+          HOST=$(echo "$SITE_URL" | sed -E 's|^https?://||' | sed -E 's|/$||' | cut -d'/' -f1)
+          echo "hostname=$HOST" >> $GITHUB_OUTPUT
+          echo "Extracted hostname: $HOST"
+
+      - name: Resolve output name
+        id: resolve-name
+        run: |
+          if [ -n "${{ github.event.inputs.output_name }}" ]; then
+            echo "name=${{ github.event.inputs.output_name }}" >> $GITHUB_OUTPUT
+          else
+            HOST="${{ steps.extract-host.outputs.hostname }}"
+            SAFE_NAME=$(echo "$HOST" | sed 's/[^a-zA-Z0-9._-]/_/g')
+            echo "name=$SAFE_NAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Pull latest kage Docker image
+        run: |
+          docker pull ghcr.io/tamnd/kage:latest
+          docker image ls ghcr.io/tamnd/kage:latest
+
+      - name: Clone website with kage
+        id: clone
+        run: |
+          SITE="${{ github.event.inputs.site }}"
+          HOST="${{ steps.extract-host.outputs.hostname }}"
+          OUTPUT_NAME="${{ steps.resolve-name.outputs.name }}"
+          MAX_DEPTH="${{ github.event.inputs.max_depth }}"
+          MAX_PAGES="${{ github.event.inputs.max_pages }}"
+          SCOPE_PREFIX="${{ github.event.inputs.scope_prefix }}"
+          SUBDOMAINS="${{ github.event.inputs.subdomains }}"
+          SCROLL="${{ github.event.inputs.scroll }}"
+
+          # Build docker run command
+          DOCKER_ARGS=(
+            --rm
+            -v "$PWD/out:/out"
+            ghcr.io/tamnd/kage:latest
+            clone
+            "$SITE"
+            -o /out
+          )
+
+          if [ "$MAX_DEPTH" -ne 0 ] 2>/dev/null; then
+            DOCKER_ARGS+=(--max-depth "$MAX_DEPTH")
+          fi
+
+          if [ "$MAX_PAGES" -ne 0 ] 2>/dev/null; then
+            DOCKER_ARGS+=(--max-pages "$MAX_PAGES")
+          fi
+
+          if [ -n "$SCOPE_PREFIX" ]; then
+            DOCKER_ARGS+=(--scope-prefix "$SCOPE_PREFIX")
+          fi
+
+          if [ "$SUBDOMAINS" = "true" ]; then
+            DOCKER_ARGS+=(--subdomains)
+          fi
+
+          if [ "$SCROLL" = "true" ]; then
+            DOCKER_ARGS+=(--scroll)
+          fi
+
+          echo "Running: docker run ${DOCKER_ARGS[*]}"
+          docker run "${DOCKER_ARGS[@]}"
+
+          # Determine the actual output directory
+          MIRROR_DIR="$PWD/out/$HOST"
+          if [ ! -d "$MIRROR_DIR" ]; then
+            echo "Warning: expected mirror dir $MIRROR_DIR not found, checking out/"
+            ls -la "$PWD/out/"
+          else
+            echo "Mirror created at: $MIRROR_DIR"
+            echo "Mirror size: $(du -sh "$MIRROR_DIR" | cut -f1)"
+          fi
+
+          echo "mirror_dir=$MIRROR_DIR" >> $GITHUB_OUTPUT
+
+      - name: Pack mirror into ZIM archive
+        id: pack
+        run: |
+          HOST="${{ steps.extract-host.outputs.hostname }}"
+          OUTPUT_NAME="${{ steps.resolve-name.outputs.name }}"
+          MIRROR_DIR="$PWD/out/$HOST"
+
+          # Run kage pack inside the same container
+          docker run --rm \
+            -v "$PWD/out:/out" \
+            ghcr.io/tamnd/kage:latest \
+            pack "$HOST" \
+            -o /out
+
+          # The zim file will be named after the hostname
+          ZIM_FILE="$PWD/out/${HOST}.zim"
+          if [ -f "$ZIM_FILE" ]; then
+            FINAL_ZIM="$PWD/out/${OUTPUT_NAME}.zim"
+            if [ "$ZIM_FILE" != "$FINAL_ZIM" ]; then
+              mv "$ZIM_FILE" "$FINAL_ZIM"
+            fi
+            echo "ZIM created: $FINAL_ZIM"
+            echo "ZIM size: $(du -sh "$FINAL_ZIM" | cut -f1)"
+            echo "zim_path=$FINAL_ZIM" >> $GITHUB_OUTPUT
+          else
+            echo "ZIM file not found, listing out/:"
+            ls -la "$PWD/out/"
+            # Fallback: create a tar.gz of the mirror dir
+            TAR_FILE="$PWD/out/${OUTPUT_NAME}.tar.gz"
+            tar -czf "$TAR_FILE" -C "$PWD/out" "$HOST"
+            echo "Created tar.gz fallback: $TAR_FILE"
+            echo "tar_path=$TAR_FILE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.resolve-name.outputs.name }}
+          path: |
+            out/${{ steps.resolve-name.outputs.name }}.*
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          HOST="${{ steps.extract-host.outputs.hostname }}"
+          echo "## Kage Clone Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Site | ${{ github.event.inputs.site }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Max Depth | ${{ github.event.inputs.max_depth }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Max Pages | ${{ github.event.inputs.max_pages }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Scope Prefix | ${{ github.event.inputs.scope_prefix || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Subdomains | ${{ github.event.inputs.subdomains }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Scroll | ${{ github.event.inputs.scroll }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- Name: \`${{ steps.resolve-name.outputs.name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Mirror location: \`out/${HOST}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Mirror Contents" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -la "out/$HOST" 2>/dev/null | head -20 >> $GITHUB_STEP_SUMMARY || echo "(directory listing failed)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
