@@ -1,38 +1,54 @@
 FROM golang:1.25-trixie
 
-ENV GO111MODULE=on
-ENV CGO_ENABLED=1
-ENV GOPROXY=https://goproxy.cn,direct
-ENV GOCACHE=/gocache/cache
-ENV GOMODCACHE=/gocache/mod_cache
-ENV GOPATH=/gocache/path
+ENV GO111MODULE=on \
+    CGO_ENABLED=1 \
+    GOPROXY=https://goproxy.cn,direct \
+    GOCACHE=/gocache/cache \
+    GOMODCACHE=/gocache/mod_cache \
+    GOPATH=/gocache/path
 
-# 1. 仅保留必须的系统依赖（去掉原先的 aarch64-gcc 和 mingw-w64 系列）
-RUN apt update && \
-    apt install -y --no-install-recommends \
+# 1. 安装基础依赖，并彻底清理 apt 索引、安装包缓存及无用的文档与多语言文件
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         curl \
         xz-utils \
         libluajit-5.1-dev && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* \
+           /var/cache/apt/* \
+           /usr/share/doc/* \
+           /usr/share/man/* \
+           /usr/share/locale/* \
+           /tmp/*
 
-# 2. 安装单文件 Zig 0.16.0 (注意官方文件名为 arch-os 顺序: x86_64-linux)
+# 2. 安装 Zig 0.16.0 并配置 CGO wrapper 脚本
 ARG ZIG_VERSION=0.16.0
 RUN curl -fLO https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
     tar -xf zig-x86_64-linux-${ZIG_VERSION}.tar.xz -C /usr/local && \
-    rm zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
-    ln -s /usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig
-
-# 3. 创建极简 wrapper 脚本，防止 Go CGO 解析 CC 空格参数异常
-# ARM64: 锁定 glibc 2.28 保证最大向下兼容性
-RUN echo '#!/bin/sh\nexec zig cc -target aarch64-linux-gnu.2.28 "$@"' > /usr/local/bin/zcc-arm64 && \
+    rm -f zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
+    ln -s /usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig && \
+    printf '#!/bin/sh\nexec zig cc -target aarch64-linux-gnu.2.28 "$@"\n' > /usr/local/bin/zcc-arm64 && \
     chmod +x /usr/local/bin/zcc-arm64 && \
-    echo '#!/bin/sh\nexec zig cc -target x86_64-windows-gnu "$@"' > /usr/local/bin/zcc-win && \
+    printf '#!/bin/sh\nexec zig cc -target x86_64-windows-gnu "$@"\n' > /usr/local/bin/zcc-win && \
     chmod +x /usr/local/bin/zcc-win
 
-# 4. 保留专有龙芯环境
+# 3. 复制龙芯工具链
 COPY ./loong-gcc8 /usr/local/loong/gcc
 COPY ./loong-gcc15 /usr/local/loongnix23.1
 COPY ./loong-go /usr/local/loong/go
+
+# 4. 彻底剔除龙芯工具链中的文档、测试用例、多语言包，并 strip 二进制调试符号
+RUN rm -rf /usr/local/loong/gcc/share/doc \
+           /usr/local/loong/gcc/share/man \
+           /usr/local/loong/gcc/share/info \
+           /usr/local/loong/gcc/share/locale \
+           /usr/local/loongnix23.1/share/doc \
+           /usr/local/loongnix23.1/share/man \
+           /usr/local/loongnix23.1/share/info \
+           /usr/local/loongnix23.1/share/locale \
+           /usr/local/loong/go/doc \
+           /usr/local/loong/go/test \
+           /usr/local/loong/go/api && \
+    find /usr/local/loong/go/src -name "*_test.go" -delete && \
+    find /usr/local/loong/gcc /usr/local/loongnix23.1 -type f -executable -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 WORKDIR /app
