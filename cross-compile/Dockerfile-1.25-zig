@@ -28,7 +28,6 @@ RUN curl -fLO https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG
 
 # 3. 直接复制已经在宿主机预先 strip/clean 好的工具链
 COPY ./loong-gcc8 /usr/local/loong/gcc
-COPY ./loong-gcc15 /usr/local/loongnix23.1
 COPY ./loong-go /usr/local/loong/go
 
 WORKDIR /app
