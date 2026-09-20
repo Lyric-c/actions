@@ -7,20 +7,15 @@ ENV GO111MODULE=on \
     GOMODCACHE=/gocache/mod_cache \
     GOPATH=/gocache/path
 
-# 1. 安装基础依赖，并彻底清理 apt 索引、安装包缓存及无用的文档与多语言文件
+# 1. 基础依赖与 apt 缓存清理
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
         xz-utils \
         libluajit-5.1-dev && \
-    rm -rf /var/lib/apt/lists/* \
-           /var/cache/apt/* \
-           /usr/share/doc/* \
-           /usr/share/man/* \
-           /usr/share/locale/* \
-           /tmp/*
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/* /usr/share/doc/* /usr/share/man/* /usr/share/locale/* /tmp/*
 
-# 2. 安装 Zig 0.16.0 并配置 CGO wrapper 脚本
+# 2. 安装 Zig 0.16.0 及 wrapper
 ARG ZIG_VERSION=0.16.0
 RUN curl -fLO https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
     tar -xf zig-x86_64-linux-${ZIG_VERSION}.tar.xz -C /usr/local && \
@@ -31,24 +26,9 @@ RUN curl -fLO https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG
     printf '#!/bin/sh\nexec zig cc -target x86_64-windows-gnu "$@"\n' > /usr/local/bin/zcc-win && \
     chmod +x /usr/local/bin/zcc-win
 
-# 3. 复制龙芯工具链
+# 3. 直接复制已经在宿主机预先 strip/clean 好的工具链
 COPY ./loong-gcc8 /usr/local/loong/gcc
 COPY ./loong-gcc15 /usr/local/loongnix23.1
 COPY ./loong-go /usr/local/loong/go
-
-# 4. 彻底剔除龙芯工具链中的文档、测试用例、多语言包，并 strip 二进制调试符号
-RUN rm -rf /usr/local/loong/gcc/share/doc \
-           /usr/local/loong/gcc/share/man \
-           /usr/local/loong/gcc/share/info \
-           /usr/local/loong/gcc/share/locale \
-           /usr/local/loongnix23.1/share/doc \
-           /usr/local/loongnix23.1/share/man \
-           /usr/local/loongnix23.1/share/info \
-           /usr/local/loongnix23.1/share/locale \
-           /usr/local/loong/go/doc \
-           /usr/local/loong/go/test \
-           /usr/local/loong/go/api && \
-    find /usr/local/loong/go/src -name "*_test.go" -delete && \
-    find /usr/local/loong/gcc /usr/local/loongnix23.1 -type f -executable -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 WORKDIR /app
