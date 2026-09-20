@@ -1,0 +1,37 @@
+FROM golang:1.25-trixie
+
+ENV GO111MODULE=on
+ENV CGO_ENABLED=1
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOCACHE=/gocache/cache
+ENV GOMODCACHE=/gocache/mod_cache
+ENV GOPATH=/gocache/path
+
+# 1. 仅保留必须的系统依赖（去掉原先的 aarch64-gcc 和 mingw-w64 系列）
+RUN apt update && \
+    apt install -y --no-install-recommends \
+        curl \
+        xz-utils \
+        libluajit-5.1-dev && \
+    apt clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. 安装单文件 Zig (直接支持 ARM64 与 Windows 交叉编译)
+ARG ZIG_VERSION=0.16.0
+RUN curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz \
+    | tar -xJ -C /usr/local && \
+    ln -s /usr/local/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
+
+# 3. 创建极简 wrapper 脚本，防止 Go CGO 解析 CC 空格参数异常
+# ARM64: 锁定 glibc 2.28 保证最大向下兼容性
+RUN echo '#!/bin/sh\nexec zig cc -target aarch64-linux-gnu.2.28 "$@"' > /usr/local/bin/zcc-arm64 && \
+    chmod +x /usr/local/bin/zcc-arm64 && \
+    echo '#!/bin/sh\nexec zig cc -target x86_64-windows-gnu "$@"' > /usr/local/bin/zcc-win && \
+    chmod +x /usr/local/bin/zcc-win
+
+# 4. 保留专有龙芯环境
+COPY ./loong-gcc8 /usr/local/loong/gcc
+COPY ./loong-gcc15 /usr/local/loongnix23.1
+COPY ./loong-go /usr/local/loong/go
+
+WORKDIR /app
